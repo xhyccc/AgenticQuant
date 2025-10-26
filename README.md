@@ -106,7 +106,6 @@ See `DEVELOPMENT.md` for adding agents or tools, prompt editing, and extension i
 - Authentication and multi-user collaboration
 
 ## License
-Specify the project license here (add LICENSE file if applicable).
-
+Email to haoyi.xiong.fr@ieee.org for details.
 ---
 Questions or ideas? Open an issue or discussion in the GitHub repo. Happy quanting! 🚀
