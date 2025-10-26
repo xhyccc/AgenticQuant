@@ -1,0 +1,40 @@
+# Core Dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.4.0
+python-multipart>=0.0.6
+
+# LLM API
+openai>=1.6.1
+anthropic>=0.7.0
+
+# Financial Data
+yfinance>=0.2.32
+pandas>=2.0.0
+numpy>=1.24.0
+akshare>=1.11.90
+efinance>=0.4.0
+
+# Analysis & Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+scipy>=1.10.0
+scikit-learn>=1.3.0
+
+# Web Search
+ddgs>=9.6.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+
+# Code Execution Sandbox
+jupyter-client>=8.0.0
+ipykernel>=6.20.0
+
+# Report Generation
+markdown>=3.4.0
+jinja2>=3.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+aiofiles>=23.0.0
+websockets>=12.0
