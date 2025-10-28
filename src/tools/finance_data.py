@@ -101,10 +101,8 @@ class FinanceDataDownloaderTool(BaseTool):
                         mask = (stooq_df["Date"].dt.date >= start_dt) & (stooq_df["Date"].dt.date <= end_dt)
                         data = stooq_df.loc[mask].reset_index(drop=True)
                         data = data.rename(columns=str.title)
-                        data = data.rename(columns={"Close": "Close", "Open": "Open", "High": "High", "Low": "Low", "Volume": "Volume"})
                         if "Close" not in data.columns:
                             raise ValueError("Stooq response missing expected columns")
-                        data.set_index("Date", inplace=True)
                     except Exception as fallback_exc:
                         summary[ticker] = {
                             "status": "failed",
@@ -116,22 +114,67 @@ class FinanceDataDownloaderTool(BaseTool):
                     summary[ticker] = {"status": "failed", "error": yf_error or "No data available"}
                     continue
 
+                # Normalize to MarketData schema
+                if not data.index.name:
+                    data.index.name = "Date"
+                data_reset = data.reset_index()
+                timestamp_col = None
+                for candidate in ("Date", "Datetime", data.index.name):
+                    if candidate in data_reset.columns:
+                        timestamp_col = candidate
+                        break
+                if timestamp_col is None:
+                    timestamp_col = data_reset.columns[0]
+                data_reset = data_reset.rename(columns={timestamp_col: "timestamp"})
+
+                column_mapping = {
+                    "Open": "open",
+                    "High": "high",
+                    "Low": "low",
+                    "Close": "close",
+                    "Adj Close": "adj_close",
+                    "Volume": "volume"
+                }
+                data_reset = data_reset.rename(columns={k: v for k, v in column_mapping.items() if k in data_reset.columns})
+                data_reset["symbol"] = ticker
+                base_columns = ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+                missing_required = [col for col in base_columns if col not in data_reset.columns]
+                if missing_required:
+                    summary[ticker] = {
+                        "status": "failed",
+                        "error": f"Missing required columns after normalization: {missing_required}"
+                    }
+                    continue
+
+                additional_cols = [col for col in data_reset.columns if col not in base_columns]
+                data_reset = data_reset[base_columns + additional_cols]
+
+                # Ensure timestamp column is normalized to naive UTC timestamps
+                timestamps = pd.to_datetime(data_reset["timestamp"], utc=True, errors="coerce")
+                data_reset["timestamp"] = timestamps.dt.tz_localize(None)
+                if data_reset["timestamp"].isnull().any():
+                    summary[ticker] = {
+                        "status": "failed",
+                        "error": "Unable to parse timestamps into MarketData schema"
+                    }
+                    continue
+
                 filename = f"{ticker}_{interval}_{start_date}_to_{end_date}.csv"
                 file_path = self.workspace_root / filename
-                data.to_csv(file_path)
+                data_reset.to_csv(file_path, index=False)
                 downloaded_files.append(str(file_path))
 
-                first_date = data.index[0]
-                last_date = data.index[-1]
-                first_str = first_date.strftime("%Y-%m-%d") if isinstance(first_date, datetime) else str(first_date)
-                last_str = last_date.strftime("%Y-%m-%d") if isinstance(last_date, datetime) else str(last_date)
+                first_date = data_reset["timestamp"].iloc[0]
+                last_date = data_reset["timestamp"].iloc[-1]
+                first_str = first_date.strftime("%Y-%m-%d")
+                last_str = last_date.strftime("%Y-%m-%d")
 
                 summary[ticker] = {
                     "status": "success",
-                    "rows": len(data),
+                    "rows": len(data_reset),
                     "start_date": first_str,
                     "end_date": last_str,
-                    "columns": list(data.columns),
+                    "columns": list(data_reset.columns),
                     "data_source": data_source,
                     "file_path": str(file_path)
                 }

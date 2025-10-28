@@ -211,6 +211,7 @@ ADDITIONAL REQUIREMENTS:
 - Ensure the code is restartable and self-contained; import any required libraries.
 - Avoid deprecated pandas usage (e.g., DataFrame.ix); use modern APIs.
 - Use defensive programming: check for file existence when appropriate and raise informative errors.
+- Write and save files strictly within the current working directory; do not create new folders or subdirectories.
 
 **DON'T** generate any *assertion* or *test cases* inside the code, even though the task description might mention the success criteria.
 """

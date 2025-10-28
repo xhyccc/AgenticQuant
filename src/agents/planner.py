@@ -10,6 +10,9 @@ from datetime import datetime, timedelta, date
 import re
 
 
+STRATEGY_INTERFACE_SNIPPET = """```python\nfrom abc import ABC, abstractmethod\nfrom typing import Dict, List, Optional, Any\nfrom dataclasses import dataclass\nfrom datetime import datetime\n\n@dataclass\nclass MarketData:\n    timestamp: datetime\n    symbol: str\n    open: float\n    high: float\n    low: float\n    close: float\n    volume: int\n    additional_data: Optional[Dict[str, Any]] = None\n\n@dataclass\nclass Signal:\n    symbol: str\n    signal_type: str  # 'BUY', 'SELL', 'HOLD'\n    quantity: Optional[float] = None\n    price: Optional[float] = None\n    confidence: float = 1.0\n    metadata: Optional[Dict[str, Any]] = None\n\n@dataclass\nclass StrategyConfig:\n    name: str\n    parameters: Dict[str, Any]\n    symbols: List[str]\n    risk_limits: Dict[str, float]\n    execution_params: Dict[str, Any]\n\nclass TradingStrategy(ABC):\n    def __init__(self, config: StrategyConfig):\n        self.config = config\n        self.initialized = False\n        self.performance_metrics = {}\n\n    @abstractmethod\n    def initialize(self, **kwargs) -> None:\n        pass\n\n    @abstractmethod\n    def generate_signals(self, market_data: Dict[str, MarketData]) -> List[Signal]:\n        pass\n\n    @abstractmethod\n    def on_market_data(self, data: MarketData) -> Optional[Signal]:\n        pass\n\n    @abstractmethod\n    def backtest(self, historical_data) -> Dict[str, Any]:\n        pass\n\n    def update_parameters(self, parameters: Dict[str, Any]) -> None:\n        self.config.parameters.update(parameters)\n\n    def get_performance_metrics(self) -> Dict[str, Any]:\n        return self.performance_metrics\n\n    def validate_config(self) -> bool:\n        required_fields = ['name', 'symbols']\n        return all(field in self.config.__dict__ for field in required_fields)\n```"""
+
+
 class PlannerAgent(BaseAgent):
     """Strategic planner that decomposes user requests into actionable plans"""
     
@@ -23,7 +26,7 @@ class PlannerAgent(BaseAgent):
             f"- {tool}: {self.tool_registry.get_tool(tool).get_definition().description}"
             for tool in available_tools
         ])
-        
+
         return f"""You are an expert Quantitative Strategist and Project Planner.
 
 Your role is to create detailed, step-by-step plans to address quantitative finance research requests.
@@ -74,18 +77,27 @@ CRITICAL REQUIREMENTS FOR PLAN QUALITY:
     - Trading cost assumptions (e.g., 5 bps per leg or user-specified) must be stated in objectives, inputs, and outputs
     - Explicitly define whether fills occur T+0 (same-day close) or T+1 (next-day open) and reflect that in performance calculations
     - Python execution tasks must emphasize: "Use only existing downloaded datasets within the workspace; do NOT call yfinance or any live market APIs."
+    - Do not assign `python_execution` to perform raw data downloads; rely on dedicated data tools (e.g., `finance_data_downloader`) and reserve `python_execution` for inspection, transformation, modeling, and evaluation tasks.
 
 8. **DELIVERABLE FORMAT**: Final reporting must be markdown-based
     - Final synthesis step produces `final_report.md`
     - The markdown should embed narrative text, display generated images, and link to supporting data artifacts stored in the workspace
+    - Use `file_saver` (optionally with `find_in_file`) to compose reports; do **not** rely on `python_execution` solely to write markdown
 
 9. **ADAPTIVE STRUCTURE**: Tailor plan length to the request
-    - Typical modules: research discovery (1~3 steps), data understanding/prep (2-4 steps), strategy design & backtest (1-3 steps), evaluation & comparison (1-2 steps), reporting (1 step)
+    - Typical modules: web search and analysis (1~3 steps), data understanding/prep (2-4 steps), strategy design & backtest (1-3 steps), evaluation & comparison (1-2 steps), reporting (1 step)
     - Adjust the exact number of steps per module based on problem complexity; avoid rigid templates
 
 10. **FILE STRUCTURE INSPECTION**: Before transforming or modeling with existing files
     - Require an inspection step using `python_execution` (lightweight schema audit) or `find_in_file` to confirm headers, column data types, metadata notes, missing values, and other structural assumptions
     - Capture the inspection output (e.g., `data_structure_notes_v1.md`) and reference it explicitly in downstream steps so tasks rely on verified structure
+
+11. **STRATEGY IMPLEMENTATION STANDARD**: Combine strategy coding and backtesting in a single step that adheres to the shared interface
+    - The code generated in that step must define or extend classes compatible with `TradingStrategy`
+    - When instructing `python_execution`, specify that both signal generation and backtest execution occur in the same script/function call so outputs reflect the unified workflow
+    - Ensure the step produces both the executable strategy module and the initial cost-adjusted backtest artifacts
+    - Provide the following interface definition verbatim inside the step instructions so the LLM can copy it without needing repository access:
+{STRATEGY_INTERFACE_SNIPPET}
 
 Output your plan as a JSON array with this structure:
 [
@@ -130,15 +142,18 @@ ADDITIONAL DIRECTIVES:
 - The plan MUST start with an in-depth online/document research step that leverages `web_search` (and other discovery tools if relevant) to capture background, real-time sentiment, macroeconomic context, and regulatory factors related to the trading target. Require saving findings into a workspace artifact (e.g., `research_notes.md`).
 - For every backtesting or analytics step, specify trading cost assumptions (e.g., 5 bps per trade) and settlement timing (clarify if orders execute same-day close [T+0] or next-day open [T+1]) and ensure outputs include cost-adjusted metrics.
 - When instructing Python execution, explicitly state in the inputs: "Use only the existing downloaded dataset(s) in the workspace; external market data APIs are prohibited."
+- Strategy implementation and the initial backtest must occur in a single step; require the generated code to integrate signal generation and evaluation using the `TradingStrategy` interface from `src/tools/strategy.py`.
+- When invoking `python_execution` for the combined implementation/backtest step, instruct the agent to produce scripts/classes compatible with that interface (e.g., subclassing `TradingStrategy` and executing its `backtest` method) so downstream tooling can reuse the artifact.
+- Embed the following interface snippet verbatim inside that step's "inputs" so the executor has direct access without referencing repository files:
 - Final deliverable must be `final_report.md` that embeds narrative text, displays generated charts via `<img>` tags, and links to supporting CSV/JSON artifacts.
+- For report writing and summarization tasks, invoke `file_saver` (optionally preceded by `find_in_file`) instead of `python_execution`.
 - Strategy refinement cycles should be consolidated into a single step that references all iterations and compares versions after accounting for costs and settlement assumptions.
 - Ensure an inspection task (using `python_execution` or `find_in_file`) captures file structure, schema, column types, missing value handling, and relevant metadata (e.g., `data_structure_notes_v1.md`) before any transformations begin; cite this artifact in later steps.
 
 MODULE GUIDANCE (flexible, do not rigidly template):
 - Research discovery and note: typically 2-3 step using web_search and file_saver tools.
 - Data understanding & preparation: usually 1-2 steps depending on complexity and number of datasets.
-- Strategy design & implementation or analytical modeling: 1-2 steps capturing code creation and configuration details.
-- Backtesting & evaluation: 1-2 steps covering execution, metric computation, cost adjustments, and benchmark comparisons.
+- Strategy implementation & backtest: a single step that builds the strategy code and runs the initial cost-adjusted evaluation.
 - Reporting & handoff: 1 step producing the markdown deliverable with embedded visuals and data links.
 
 Ensure the resulting JSON array follows the specified schema and that each step is fully self-contained."""
@@ -259,30 +274,33 @@ Ensure the resulting JSON array follows the specified schema and that each step 
             },
             {
                 "step_number": 3,
-                "objective": f"Implement initial {strategy_descriptor} strategy logic leveraging {indicator} signals and configurable trading frictions (trading cost = 5 bps per transaction, settlement assumption = T+1), packaging executable code for reuse",
+                "objective": f"Build and backtest the initial {strategy_descriptor} strategy in one pass using the `TradingStrategy` interface, combining signal generation, execution frictions (5 bps per leg), and settlement handling (T+1 base with T+0 sensitivity)",
                 "required_tools": ["python_execution", "file_saver"],
-                "inputs": f"Dataset: {processed_filename}; Strategy parameters: indicator window=20, entry/exit rules tied to {indicator}, position sizing=100% notional, trading_cost_bps=5, settlement_convention='T+1'; task description must reiterate offline data constraint",
-                "outputs": "strategy_v1.py implementing data loading, signal generation honor settlement lag, cost-adjusted PnL, and modular configuration block",
-                "success_criteria": "strategy_v1.py stored in workspace, functions documented with cost and settlement parameters, dry-run executes without external data downloads"
+                "inputs": (
+                    f"Dataset: {processed_filename}; implement a class that subclasses `TradingStrategy` in src/tools/strategy.py, encapsulating {indicator}-driven logic, cost handling (5 bps), and settlement toggle; include helper to run `backtest` for T+1 baseline and T+0 sensitivity; "
+                    "execution instructions must reiterate the offline data constraint and direct the script to persist metrics and plots in workspace.\n"
+                    "Copy this strategy interface snippet verbatim before coding so the environment has the full definition:\n\n"
+                    f"{STRATEGY_INTERFACE_SNIPPET}"
+                ),
+                "outputs": (
+                    "strategy_v1.py defining the TradingStrategy-compliant class and invoking its backtest routine, "
+                    f"{strategy_results_filename} with scenario-labelled returns, results_v1.json capturing key cost-adjusted metrics, {metrics_filename} summarizing CAGR/Sharpe/Sortino/Max Drawdown/Win Rate for each settlement assumption, "
+                    f"{equity_curve_filename} overlaying strategy vs benchmark, and execution log saved as evaluation_v1.md summarizing methodological notes"
+                ),
+                "success_criteria": (
+                    "strategy_v1.py instantiates a TradingStrategy subclass with initialize/generate_signals/backtest methods, runs without external data calls, and produces cost-adjusted artifacts for both T+1 and T+0 scenarios"
+                )
             },
             {
                 "step_number": 4,
-                "objective": f"Backtest strategy_v1.py on {processed_filename} producing cost-adjusted performance metrics and visuals comparing T+1 base case versus alternative T+0 sensitivity",
-                "required_tools": ["python_execution", "regression_based_strategy_evaluation", "file_saver"],
-                "inputs": "Execution instructions must state to reuse existing dataset only; run two scenarios (T+1 base with 5 bps costs, T+0 sensitivity with same costs); include benchmark = buy-and-hold from processed data",
-                "outputs": f"{strategy_results_filename} with scenario-labelled returns, {metrics_filename} summarizing CAGR, Sharpe, Sortino, Max Drawdown, Win Rate, turnover-adjusted PnL for each settlement assumption, {equity_curve_filename} overlaying equity curves vs benchmark",
-                "success_criteria": f"{metrics_filename} reports both T+1 and T+0 rows with cost-adjusted metrics, {equity_curve_filename} displays both strategy variants and benchmark, backtest log confirms no live API usage"
+                "objective": f"Synthesize evaluator and judger feedback to iterate on the {strategy_descriptor} logic (strategy_v1 → strategy_v2 → strategy_v3 if needed), ensuring each revision quantifies improvements net of trading costs and settlement effects",
+                "required_tools": ["python_execution", "file_saver", "regression_based_strategy_evaluation", "find_in_file"],
+                "inputs": f"Artifacts: strategy_v1.py, {strategy_results_filename}, results_v1.json, {processed_filename}, evaluation_v1.md, feedback files, cost assumptions (5 bps), settlement options (T+1 base, T+0 sensitivity); reiterate offline data constraint in execution instructions",
+                "outputs": "If improvements are attempted, produce strategy_v2.py/results_v2.json/evaluation_v2.md/feedback_v2.txt (and strategy_v3.py/... as needed) plus {comparison_filename} compiling key metrics across versions and settlement scenarios",
+                "success_criteria": f"Each iteration documents changes, produces cost-adjusted metrics matching the TradingStrategy interface outputs, and {comparison_filename} highlights the best-performing version with settlement context"
             },
             {
                 "step_number": 5,
-                "objective": f"Synthesize evaluator and judger feedback to iterate on the {strategy_descriptor} logic (strategy_v1 → strategy_v2 → strategy_v3 if needed), ensuring each revision quantifies improvements net of trading costs and settlement effects",
-                "required_tools": ["python_execution", "file_saver", "regression_based_strategy_evaluation", "find_in_file"],
-                "inputs": f"Artifacts: strategy_v1.py, {processed_filename}, feedback files, cost assumptions (5 bps), settlement options (T+1 base, T+0 sensitivity); reiterate offline data constraint in execution instructions",
-                "outputs": "strategy_v1.py/results_v1.json/evaluation_v1.md/feedback_v1.txt, strategy_v2.py/results_v2.json/evaluation_v2.md/feedback_v2.txt, strategy_v3.py/results_v3.json/evaluation_v3.md/feedback_v3.txt as produced, {comparison_filename} compiling key metrics across versions and settlement scenarios",
-                "success_criteria": f"Each iteration records cost-adjusted metrics, {comparison_filename} highlights best-performing version with settlement context, feedback files confirm addressed comments"
-            },
-            {
-                "step_number": 6,
                 "objective": "Generate markdown deliverable summarizing research context, data preparation, strategy iterations, and performance comparisons with embedded visuals and links to supporting artifacts",
                 "required_tools": ["find_in_file", "file_saver"],
                 "inputs": f"Inputs: {research_notes_filename}, {processed_filename}, {metrics_filename}, {equity_curve_filename}, {comparison_filename}, evaluation and feedback docs; ensure markdown references local images and links to CSV/JSON files",
