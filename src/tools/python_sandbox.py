@@ -52,6 +52,7 @@ EFFECTIVE TASK DESCRIPTIONS SHOULD:
 - Describe the analytical steps (transformations, indicators, models, metrics)
 - Specify any plots or tables to produce and desired filenames
 - Note success criteria or checks that should appear in the logs
+- *Don't* download datasets using code (Use finance data downloader to download dataset); assume files are already present in the workspace
 
 The working directory is the workspace folder. All saved files will be available for review and use in subsequent steps.""",
             parameters=[
@@ -213,6 +214,9 @@ ADDITIONAL REQUIREMENTS:
 - Use defensive programming: check for file existence when appropriate and raise informative errors.
 - Write and save files strictly within the current working directory; do not create new folders or subdirectories.
 
+
+**ALWAYS** use single quotes (') for string literals instead of double quotes (") to avoid escaping issues in the execution wrapper.
+**DON'T** use f-strings, or % formatting; use .format() instead to avoid quote escaping complications in the execution environment.
 **DON'T** generate any *assertion* or *test cases* inside the code, even though the task description might mention the success criteria.
 """
 
